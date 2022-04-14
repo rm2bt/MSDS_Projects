@@ -1,0 +1,541 @@
+---
+title: "UVA Health Capstone"
+author: "Rehan Merchant, Luke Ford, Avinaash Pavuloori, Ryan Williams"
+date: "2/16/2022"
+output: html_document
+---
+
+
+Thoughts:
+1) We are going to need to do some preprocessing steps in the other r document such as changing data types but we should be able to do a majority of the modifications in this document.
+
+Questions that we need to think about:
+1) How are we going to deal with age because patients could have three different ages over the course of this three year period?
+      I would recommend sorting by encounter number (if they are in chronological order) or by date if not and taking the age of the first encounter
+2) How are we going to deal with deceased patients?
+      Do we need to remove them from the data? Thoughts?
+3) How do we deal with primary payer? (just their original one?)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5.5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "49%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=TRUE)      # show R messages
+```
+
+```{r}
+# load required libraries
+library(tidyverse)
+library(ISLR)
+library(boot)
+library(caret)
+library(MASS)
+library(class)
+library(lubridate)
+```
+
+
+
+# Original Data
+```{r load-data, warning=FALSE, message=FALSE}
+# loading patient data
+original_data <- read.csv("full_data.csv") # change to match your directory
+```
+
+```{r}
+# turn all empty cells into NA
+original_data <- original_data %>% mutate_all(na_if, "")
+```
+
+## Basic Information
+```{r}
+# get size of the data frame
+dim(original_data)
+```
+
+```{r}
+# get names of columns
+colnames(original_data)
+```
+
+```{r}
+# preview of data
+head(original_data)
+```
+
+# Data Wrangling
+```{r}
+data <- original_data[,-1] # drop the first row that is an old index
+```
+
+## Creating Subset of Necessary Rows
+```{r}
+# select the rows that are useful for the clustering and multinomial regression
+data <- subset(data, select=c(ENC_NO, appt_dtm_mod, Patient_ID_mod, DEPARTMENT_NAME_EXTERNAL,
+                              Encounter_Type_Status, CANCEL_REASON_NAME, 
+                              Age_mod, Clrt_Sex, Clrt_Ethnic, PT_RACE, Clrt_Lang, Intrprtr_Need_YN,
+                              Elixhauser, Enc_Primary_Payor, 
+                              Visits_ED, Visits_EDtoIP, Visits_IP, PrimaryCare_Encounters, Visits_Completed, Visits_PCP, Visits_PCPDEPT,
+                              ADULT_PALLIATIVE_CARE_REGISTRY_UVA, 
+                              ANESTHESIA_RECORD_REGISTRY, 
+                              ASTHMA_REGISTRY,BEWELL_REGISTRY_UVA, 
+                              CANCER_POPULATION_REGISTRY,
+                              CHRONIC_KIDNEY_DISEASE_REGISTRY,
+                              CHRONIC_OPIOID_USE_REGISTRY_UVA,
+                              CONGESTIVE_HEART_FAILURE_REGISTRY,
+                              CONTROLLED_SUBSTANCE_REGISTRY_UVA,
+                              COPD_REGISTRY,
+                              CORONARY_ARTERY_DISEASE_REGISTRY,        
+                              CYSTIC_FIBROSIS_REGISTRY,               
+                              DIABETES_REGISTRY,                      
+                              HYPERTENSION_REGISTRY,                  
+                              ICU_STAY_REGISTRY,                      
+                              INFLAMMATORY_BOWEL_DISEASE_UVA,         
+                              INPATIENT_READMISSION_REGISTRY,          
+                              JOINT_REPLACEMENT_REGISTRY_HIP_AND_KNEE,
+                              LUNG_CANCER_SCREENING_REGISTRY_UVA,      
+                              OBESITY_REGISTRY,                     
+                              OSTEOPOROSIS_REGISTRY,                   
+                              PEDIATRIC_OBESITY_REGISTRY,             
+                              PREDIABETES_REGISTRY,                    
+                              TOBACCO_REGISTRY,                      
+                              WOUND_REGISTRY ))
+
+# ENC_PROVIDER_TYPE, Is_Resdnt, PROC_NAME,CANCEL_INITIATOR, 
+# Is_Walk_In_YN, Intrprtr_Need_YN, DEPARTMENT_NAME_EXTERNAL, Enc_Typ_Nme, Appt_Sts_Nme, 
+# ADULT_PALLIATIVE_CARE_REGISTRY_UVA, ANESTHESIA_RECORD_REGISTRY, ASTHMA_REGISTRY, BEWELL_REGISTRY_UVA, CANCER_POPULATION_REGISTRY, CHRONIC_KIDNEY_DISEASE_REGISTRY,
+# CHRONIC_OPIOID_USE_REGISTRY_UVA, CONGESTIVE_HEART_FAILURE_REGISTRY, CONTROLLED_SUBSTANCE_REGISTRY_UVA, COPD_REGISTRY, CORONARY_ARTERY_DISEASE_REGISTRY,
+# CYSTIC_FIBROSIS_REGISTRY, DIABETES_REGISTRY, HYPERTENSION_REGISTRY, ICU_STAY_REGISTRY, INFLAMMATORY_BOWEL_DISEASE_UVA, INPATIENT_READMISSION_REGISTRY,
+# JOINT_REPLACEMENT_REGISTRY_HIP_AND_KNEE, LUNG_CANCER_SCREENING_REGISTRY_UVA, OBESITY_REGISTRY, OSTEOPOROSIS_REGISTRY, PEDIATRIC_OBESITY_REGISTRY, PREDIABETES_REGISTRY,
+# TOBACCO_REGISTRY, WOUND_REGISTRY,
+#  PRINCIPLE_DIAGNOSIS, PRINCIPLE_DIAGNOSIS_DESC
+
+dim(data)
+```
+
+```{r}
+summary(data)
+```
+
+## Changing Data Types
+```{r}
+# ENC_NO - Encounter number shouldnt have to do anything
+# sk_Fact_Pt_Enc_Clrt_mod - Not sure of meaning all are Na's so far
+data$Patient_ID_mod <- as.factor(data$Patient_ID_mod)
+# sk_Dim_Pt - Not sure of meaning all are Na's so far
+#data$Contact_Date_mod <- ymd_hms(data$Contact_Date_mod) # guessing date appointment was made
+#data$appt_dtm_mod <- ymd_hms(data$appt_dtm_mod) # guessing date and time appointment was made
+#data$Adm_Dtm_mod <- ymd_hms(data$Adm_Dtm_mod) # guessing data of appointment
+#data$Dsch_Dtm_mod <- ymd_hms(data$Dsch_Dtm_mod) # not sure what this is
+#data$Is_Walk_In_YN <- as.factor(data$Is_Walk_In_YN) # walk in in need to figure what is yes
+data$Intrprtr_Need_YN <- as.factor(data$Intrprtr_Need_YN) # need to figure out what factors mean
+data$DEPARTMENT_NAME_EXTERNAL <- as.factor(data$DEPARTMENT_NAME_EXTERNAL) #department name
+#data$Enc_Typ_Nme <- as.factor(data$Enc_Typ_Nme) # encounter type
+#data$Appt_Sts_Nme <- as.factor(data$Appt_Sts_Nme) # appointment status
+#data$adt_pt_cls <- as.factor(data$adt_pt_cls) # not sure yet
+#data$ED_Disposition <- as.factor(data$ED_Disposition) # not sure yet
+data$Encounter_Type_Status <- as.factor(data$Encounter_Type_Status) # what does the history factor mean
+# PCP_Name - can probably get rid of this column
+# data$PCP_PROVIDER_TYPE <-  as.factor(data$PCP_PROVIDER_TYPE)
+# ENC_PROVIDER_NAME
+#data$ENC_PROVIDER_TYPE <- as.factor(data$ENC_PROVIDER_TYPE)
+#data$Is_Resdnt <- as.factor(data$Is_Resdnt)
+#data$PROC_NAME <- as.factor(data$PROC_NAME) #check for miss spellings
+# APPT_LENGTH
+#data$ROOMED_DTTM_mod <- ymd_hms(data$ROOMED_DTTM_mod) # not sure what this is maybe time they entered room
+#data$SIGNIN_DTTM_mod <- ymd_hms(data$SIGNIN_DTTM_mod) # im guessing time signed in
+# TIME_TO_ROOM_MINUTES
+# TIME_IN_ROOM_MINUTES
+# CYCLE_TIME_MINUTES
+data$CANCEL_REASON_NAME <- as.factor(data$CANCEL_REASON_NAME) # maybe look to subtract non-patient reasons from total cancels
+#data$CANCEL_INITIATOR <- as.factor(data$CANCEL_INITIATOR) # look above
+data$Clrt_Ethnic <- as.factor(data$Clrt_Ethnic)
+data$Clrt_Lang <- as.factor(data$Clrt_Lang)
+# Age_mod need to modify age. Im guessing 90+ is reprsented as 900, but check with angela
+#data$Death_Dte_mod <- ymd_hms(data$Death_Dte_mod)
+data$Clrt_Sex <- as.factor(data$Clrt_Sex)
+data$PT_RACE <- as.factor(data$PT_RACE)
+#data$last_pcp_prov_visit_dtm_mod <- ymd_hms(data$last_pcp_prov_visit_dtm_mod)
+#data$last_pcp_dept_visit_dtm_mod <- ymd_hms(data$last_pcp_dept_visit_dtm_mod)
+# months_from_pcp_prov_visit # 999 appears to be NA
+# months_from_pcp_deptv_visit_dtm # 999 appears to be NA
+data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA <- as.factor(data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA) # what do these mean
+data$ANESTHESIA_RECORD_REGISTRY <- as.factor(data$ANESTHESIA_RECORD_REGISTRY)
+data$ASTHMA_REGISTRY <- as.factor(data$ASTHMA_REGISTRY)
+data$BEWELL_REGISTRY_UVA <- as.factor(data$BEWELL_REGISTRY_UVA)
+data$CANCER_POPULATION_REGISTRY <- as.factor(data$CANCER_POPULATION_REGISTRY)
+data$CHRONIC_KIDNEY_DISEASE_REGISTRY <- as.factor(data$CHRONIC_KIDNEY_DISEASE_REGISTRY)
+data$CHRONIC_OPIOID_USE_REGISTRY_UVA <- as.factor(data$CHRONIC_OPIOID_USE_REGISTRY_UVA)
+data$CONGESTIVE_HEART_FAILURE_REGISTRY <- as.factor(data$CONGESTIVE_HEART_FAILURE_REGISTRY)
+data$CONTROLLED_SUBSTANCE_REGISTRY_UVA <- as.factor(data$CONTROLLED_SUBSTANCE_REGISTRY_UVA)
+data$COPD_REGISTRY <- as.factor(data$COPD_REGISTRY)
+data$CORONARY_ARTERY_DISEASE_REGISTRY <- as.factor(data$CORONARY_ARTERY_DISEASE_REGISTRY)
+data$CYSTIC_FIBROSIS_REGISTRY <- as.factor(data$CYSTIC_FIBROSIS_REGISTRY)
+data$DIABETES_REGISTRY <- as.factor(data$DIABETES_REGISTRY)
+data$HYPERTENSION_REGISTRY <- as.factor(data$HYPERTENSION_REGISTRY)
+data$ICU_STAY_REGISTRY <- as.factor(data$ICU_STAY_REGISTRY)
+data$INFLAMMATORY_BOWEL_DISEASE_UVA <- as.factor(data$INFLAMMATORY_BOWEL_DISEASE_UVA)
+data$INPATIENT_READMISSION_REGISTRY <- as.factor(data$INPATIENT_READMISSION_REGISTRY)
+data$JOINT_REPLACEMENT_REGISTRY_HIP_AND_KNEE <- as.factor(data$JOINT_REPLACEMENT_REGISTRY_HIP_AND_KNEE)
+data$LUNG_CANCER_SCREENING_REGISTRY_UVA <- as.factor(data$LUNG_CANCER_SCREENING_REGISTRY_UVA)
+data$OBESITY_REGISTRY <- as.factor(data$OBESITY_REGISTRY)
+data$OSTEOPOROSIS_REGISTRY <- as.factor(data$OSTEOPOROSIS_REGISTRY)
+data$PEDIATRIC_OBESITY_REGISTRY <- as.factor(data$PEDIATRIC_OBESITY_REGISTRY)
+data$PREDIABETES_REGISTRY <- as.factor(data$PREDIABETES_REGISTRY)
+data$TOBACCO_REGISTRY <- as.factor(data$TOBACCO_REGISTRY)
+data$WOUND_REGISTRY <- as.factor(data$WOUND_REGISTRY)
+# Elixhauser
+data$Enc_Primary_Payor <- as.factor(data$Enc_Primary_Payor)
+# Visits_ED
+# Visits_EDtoIP
+# Visits_IP
+# Visits_ED_2019
+# Visits_EDtoIP_2019
+# Visits_IP_2019
+# Visits_ED_2020
+# Visits_EDtoIP_2020
+# Visits_IP_2020
+# Visits_ED_2021
+# Visits_EDtoIP_2021
+# Visits_IP_2021
+# PrimaryCare_Encounters
+# Visits_Completed
+# Visits_PCP
+# Visits_PCPDEPT
+#data$PRINCIPLE_DIAGNOSIS <- as.factor(data$PRINCIPLE_DIAGNOSIS)
+# PRINCIPLE_DIAGNOSIS_DESC
+```
+
+
+## Modifications To Entire Data Set
+```{r}
+# modifications
+data <- data %>% dplyr::arrange(appt_dtm_mod) %>% # sorting by appointment date so when grouping by we get initial age, primary payor etc
+  mutate(Age_mod = ifelse(Age_mod == 900,90, Age_mod), # taking 900 value which represnts any one over 90 and changing it to 90, so all 90+ year olds will be represented by the number 90 [Confirmed]
+         Elixhauser = ifelse(is.na(Elixhauser), 0, Elixhauser)) # people with perfect elixhauser scores were being represented by NAs, mutatuing the NAs to equal 0 instead. [need to confrim]
+
+# modification for primary_insurance
+
+data$insurance_buckets <- ifelse(grepl("MEDICARE", data$Enc_Primary_Payor),"Medicare",ifelse(grepl("MEDICAID", data$Enc_Primary_Payor),"Medicaid",ifelse(grepl("Self Pay", data$Enc_Primary_Payor),"Self Pay","Private")))
+data$insurance_buckets <- as.factor(data$insurance_buckets)
+
+# modification for language / maybe interpreter needed - need to figure out a better way to link if a interpreter is needed might need to create another table and join if we want it
+data$lang_buckets <- ifelse(grepl("English",data$Clrt_Lang),"English",ifelse(grepl("Spanish",data$Clrt_Lang),"Spanish","Other"))
+data$lang_buckets <- as.factor(data$lang_buckets)
+
+# modification for cancel reason name, buckets were based on smaller data set, will have to adjust with the bigger data set with new features
+# NA, Other, Patient, Provider
+data$cancel_reason_bucket <- ifelse(grepl("Change in Medical Necessity",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Deceased",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Error",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Facility Cancelled",data$CANCEL_REASON_NAME),"Provider",ifelse(grepl("Home Health - Rescheduled with another provider",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Home Health Provider",data$CANCEL_REASON_NAME),"Provider",ifelse(grepl("Hospitalized",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Information Added/Revised",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Lacking Required Insurance Referral or Authorization",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Patient Left Without Being Seen",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Patient's Request",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Patient's Request - Cancelled Via Automated Reminder System",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Patient's Request - Transportation Issues",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Provider",data$CANCEL_REASON_NAME),"Provider",ifelse(grepl("Provider Unavailable",data$CANCEL_REASON_NAME),"Provider",ifelse(grepl("Referring Physician Cancelled",data$CANCEL_REASON_NAME),"Provider",ifelse(grepl("Short notice cancel/reschedule by patient",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Weather or Facility Issue",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("COVID",data$CANCEL_REASON_NAME),"COVID",ifelse(grepl("Coordinating Appointment",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Patient too ill",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Rescheduled to Telemedicine Visit",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Cancel",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Scheduled from Wait List",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Patient's request - Seeing Non-UVA Provider/Wait List Is Too Long",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Understaffed",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Patient Technical Issues",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Patient",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Cancelled via MyChart",data$CANCEL_REASON_NAME),"Patient",ifelse(grepl("Home Health - unable to reach patient",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("HIS Only - Duplicate MRN",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("Appointment Scheduled in Error",data$CANCEL_REASON_NAME),"Other",ifelse(grepl("At Capacity",data$CANCEL_REASON_NAME),"Other",NA)))))))))))))))))))))))))))))))))
+
+
+data$cancel_reason_bucket <- as.factor(data$cancel_reason_bucket)
+
+#modification of race
+
+data$race_bucket <- ifelse(grepl("Asian",data$PT_RACE),"Asian",ifelse(grepl("Not Available",data$PT_RACE),"Unknown",ifelse(grepl("Hispanic",data$PT_RACE),"Other",ifelse(grepl("Indian",data$PT_RACE),"Asian",ifelse(grepl("Unknown",data$PT_RACE),"Unknown",ifelse(grepl("Other",data$PT_RACE),"Other",ifelse(grepl("UNKNOWN",data$PT_RACE),"Unknown",ifelse(grepl("Black",data$PT_RACE),"Black",ifelse(grepl("White",data$PT_RACE),"White","Unknown")))))))))
+
+# confirm these are the right representations
+```
+
+```{r}
+#change registry NA to 0
+
+data[, 10:50][is.na(data[, 10:50])] <- 0
+```
+
+```{r}
+dim(data)
+```
+
+```{r}
+#to delete
+cancel_table <- data %>% count(CANCEL_REASON_NAME) %>% arrange(n)
+cancel_table
+
+race_table <- data %>% count(PT_RACE) %>% arrange(n)
+race_table
+```
+
+```{r}
+data[0:500,] %>% arrange(desc(Encounter_Type_Status))
+```
+
+```{r}
+#delete?
+data_test  <- data[-which(data$appt_dtm_mod == ""), ]
+data_test %>% dplyr::filter(Patient_ID_mod == 466155)  %>%  arrange(desc(Enc_Primary_Payor), appt_dtm_mod)
+```
+
+# Data Set with Factors Important for Multinomial Regression
+Create seperate data set with features for the multinomial regression - We can add in the registries later if we think they could be important
+```{r}
+# Need to look at this further. For some reason the first data_mult section isnt working
+
+#data_mult <- data[-which(data$appt_dtm_mod == ""), ] # | data$Enc_Primary_Payor == "" ), ] # create a second set of data # removes all empty dates and primary payor
+#data2 <- data2[!is.na(data2$Elixhauser), ] # removes NAs for Elixhauser (produces 27,424 vs 34,957 distinct patient IDs so might not want to remove them) # dont think we want to remove them
+data_mult <- distinct(data, Patient_ID_mod, .keep_all = TRUE)
+data_mult <- data_mult %>% dplyr::select(Patient_ID_mod, Elixhauser, insurance_buckets, Age_mod, Clrt_Sex, PT_RACE, Clrt_Ethnic, lang_buckets, cancel_reason_bucket, race_bucket, ADULT_PALLIATIVE_CARE_REGISTRY_UVA, 
+                              ANESTHESIA_RECORD_REGISTRY, 
+                              ASTHMA_REGISTRY,BEWELL_REGISTRY_UVA, 
+                              CANCER_POPULATION_REGISTRY,
+                              CHRONIC_KIDNEY_DISEASE_REGISTRY,
+                              CHRONIC_OPIOID_USE_REGISTRY_UVA,
+                              CONGESTIVE_HEART_FAILURE_REGISTRY,
+                              CONTROLLED_SUBSTANCE_REGISTRY_UVA,
+                              COPD_REGISTRY,
+                              CORONARY_ARTERY_DISEASE_REGISTRY,        
+                              CYSTIC_FIBROSIS_REGISTRY,               
+                              DIABETES_REGISTRY,                      
+                              HYPERTENSION_REGISTRY,                  
+                              ICU_STAY_REGISTRY,                      
+                              INFLAMMATORY_BOWEL_DISEASE_UVA,         
+                              INPATIENT_READMISSION_REGISTRY,          
+                              JOINT_REPLACEMENT_REGISTRY_HIP_AND_KNEE,
+                              LUNG_CANCER_SCREENING_REGISTRY_UVA,      
+                              OBESITY_REGISTRY,                     
+                              OSTEOPOROSIS_REGISTRY,                   
+                              PEDIATRIC_OBESITY_REGISTRY,             
+                              PREDIABETES_REGISTRY,                    
+                              TOBACCO_REGISTRY,                      
+                              WOUND_REGISTRY) #might want to add in the specific registries later on and if interpreter is needed
+head(data_mult)
+dim(data_mult)
+```
+
+Possible Features to include for multinomial regression
+• elixhauser (do we want initial or average)
+• primary insurance (think we will only be able to take first, any other thoughts) (initial might be better for predicting new patients but current might be better for clustering moving forward)
+
+
+• age
+• gender
+• ethnicity
+• race
+• interpreter needed
+• registries
+
+```{r}
+patient_id <- data$Patient_ID_mod
+unique_patient_id <- unique(patient_id)
+length(unique_patient_id)
+```
+
+```{r}
+#to delete?
+data %>% dplyr::filter(Patient_ID_mod == 791225) %>% arrange(desc(Elixhauser))
+```
+
+```{r}
+summary(data_mult)
+```
+
+# Data Set with Factors for Clustering
+
+## Modifications for Clustering Data Set
+
+```{r}
+
+```
+
+
+### Reshaping Data
+```{r}
+#data to reshape - takes roughly 3.5 minutes
+#CANCEL_REASON_NAME
+#data_reshape <- data.frame(model.matrix(~cancel_reason_bucket-1, data=data))
+#data_reshape <- subset(data_reshape, select = -c(cancel_reason_bucket))
+#data_clust <- cbind(data,data_reshape)
+
+data_clust <- data
+
+#data_reshape <- data.frame(model.matrix(~CANCEL_REASON_NAME-1, data=data))
+#data_reshape <- subset(data_reshape, select = -c(CANCEL_REASON_NAME))
+#data_clust <- cbind(data,data_reshape)
+
+#Encounter_Type_Status
+#data_reshape2 <- data.frame(model.matrix(~Encounter_Type_Status-1, data=data))
+#data_reshape2 <- subset(data_reshape2, select = -c(Encounter_Type_Status))
+#data_clust <- cbind(data_clust,data_reshape2)
+#data_clust
+```
+
+
+```{r}
+colnames(data_clust)
+```
+
+```{r}
+data_clust <- subset(data_clust, select=c(ENC_NO, appt_dtm_mod, Patient_ID_mod, Encounter_Type_Status,
+                              Visits_ED, Visits_EDtoIP, Visits_IP, PrimaryCare_Encounters, Visits_Completed, Visits_PCP, Visits_PCPDEPT))
+                     
+                     
+#                              CANCEL_REASON_NAMECancelled.via.MyChart, CANCEL_REASON_NAMEHome.Health...unable.to.reach.patient, CANCEL_REASON_NAMELacking.Required.Insurance.Referral.or.Authorization, CANCEL_REASON_NAMEPatient.Left.Without.Being.Seen,
+#                              CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System, CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues, CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient,
+#                              CANCEL_REASON_NAMEPatient, CANCEL_REASON_NAMEPatient.Technical.Issues))
+```
+
+
+### Feature Engineering
+```{r}
+# create the group_by
+patient <- data_clust %>% group_by(Patient_ID_mod) # each patient is distinct
+
+#select(Patient_ID_mod, PrimaryCare_Encounters, Visits_PCP, Visits_ED, Visits_EDtoIP, Visits_IP, CANCEL_REASON_NAMEPatient.s.Request
+# create the new grouped data set
+data_clust <- patient  %>% dplyr::select(ENC_NO, appt_dtm_mod, Patient_ID_mod, Encounter_Type_Status,
+                              Visits_ED, Visits_EDtoIP, Visits_IP, PrimaryCare_Encounters, Visits_Completed, Visits_PCP, Visits_PCPDEPT) %>% 
+                              #,CANCEL_REASON_NAMECancelled.via.MyChart, CANCEL_REASON_NAMEHome.Health...unable.to.reach.patient, CANCEL_REASON_NAMELacking.Required.Insurance.Referral.or.Authorization, CANCEL_REASON_NAMEPatient.Left.Without.Being.Seen,
+                              #CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System, CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues, CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient,
+                              #CANCEL_REASON_NAMEPatient, CANCEL_REASON_NAMEPatient.Technical.Issues) %>% 
+  
+  dplyr::summarise(PCPDEPT = mean(Visits_PCPDEPT), ED = mean(Visits_ED), IP = mean(Visits_IP), EDtoIP = mean(Visits_EDtoIP), PC_Encounters = mean(PrimaryCare_Encounters)) %>% 
+                  # , Visits_Completed = mean(Visits_Completed), CANCEL_REASON_NAMECancelled.via.MyChart = sum(CANCEL_REASON_NAMECancelled.via.MyChart), CANCEL_REASON_NAMEHome.Health...unable.to.reach.patient = sum(CANCEL_REASON_NAMEHome.Health...unable.to.reach.patient),CANCEL_REASON_NAMELacking.Required.Insurance.Referral.or.Authorization = sum(CANCEL_REASON_NAMELacking.Required.Insurance.Referral.or.Authorization),CANCEL_REASON_NAMEPatient.Left.Without.Being.Seen = sum(CANCEL_REASON_NAMEPatient.Left.Without.Being.Seen), CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System = sum(CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System),CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues = sum(CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues), CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient = sum(CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient), CANCEL_REASON_NAMEPatient = sum(CANCEL_REASON_NAMEPatient), CANCEL_REASON_NAMEPatient.Technical.Issues = sum(CANCEL_REASON_NAMEPatient.Technical.Issues)) %>% 
+  
+  dplyr::mutate(PC_Visits = PCPDEPT, ED_Visits = (ED + EDtoIP)) %>% 
+                
+                #, Non_Visit_Encounters = PC_Encounters - PCPDEPT, Visit_Completed_Percentage = Visits_Completed / (Visits_Completed + CANCEL_REASON_NAMECancelled.via.MyChart + CANCEL_REASON_NAMEHome.Health...unable.to.reach.patient + CANCEL_REASON_NAMELacking.Required.Insurance.Referral.or.Authorization + CANCEL_REASON_NAMEPatient.Left.Without.Being.Seen + CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System + CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues +CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient +CANCEL_REASON_NAMEPatient +  CANCEL_REASON_NAMEPatient.Technical.Issues)) %>% 
+  
+  dplyr::select(Patient_ID_mod, PC_Visits, PC_Encounters, ED_Visits) #, Non_Visit_Encounters) 
+
+#data_clust$ED_Percentage[is.na()] <- 0
+
+# replace index with patient ID
+#clustering_data <- remove_rownames(clustering_data)
+#clustering_data <- column_to_rownames(clustering_data, 'Patient_ID_mod')
+
+#data_clust$ED_Percentage[is.na(data_clust$ED_Percentage)] <- 0 # changes NA values in ED_Percentage to 0s. The NA is caused  when there are 0 Total visits.
+
+head(data_clust)                                                                                                                                            
+```
+
+Feature Engineering 
+• Total_Visits = Visits_PCPDEPT + Visits_ED + Visits_IP + Visits_EDtoIP # Dr. Babit only cares about Visits_PCPDEPT
+• ED_Percentage = (Visits_ED + Visits_EDtoIP) / Total_Visits
+• Non_Visit_Encounters = PrimaryCare_Encounters - Visits_PCPDEPT
+
+• Visit_Completed_Percentage = Visits_Completed / (Visits_Completed + CANCEL_REASON_NAMEShort.notice.cancel.reschedule.by.patient + CANCEL_REASON_NAMEPatient.s.Request + CANCEL_REASON_NAMEPatient.s.Request...Transportation.Issues + CANCEL_REASON_NAMEPatient.s.Request...Cancelled.Via.Automated.Reminder.System + ANCEL_REASON_NAMEPatient.Left.Without.Being.Seen)
+
+
+• CANCEL_REASON_NAME (used to determine if cancel reason was on patients fault)
+• Encounter_Type_Status (are certain encounters less resource intensive then others)
+• ENC_PROVIDER_TYPE (does it matter resource wise who they are seeing)
+
+```{r}
+#to delete
+#data_clust %>% dplyr::arrange(ED_Percentage)
+```
+
+```{r}
+#to delete?
+data %>% dplyr::select(Patient_ID_mod,  Visits_PCPDEPT, Visits_ED, Visits_IP, Visits_EDtoIP) %>%  dplyr::filter(Patient_ID_mod ==  153)
+```
+
+
+```{r}
+#to delete
+data_clust$ED_Percentage[is.na(data_clust$ED_Percentage)] <- 0
+data_clust %>%  dplyr::filter(is.na(ED_Percentage))
+```
+
+
+```{r}
+head(patient)
+```
+
+
+```{r}
+#to delete?
+data %>% dplyr::filter(Patient_ID_mod == 4470807) %>% dplyr::arrange(Encounter_Type_Status)
+```
+
+
+```{r}
+#to delete?
+patient %>% dplyr::filter(Patient_ID_mod == 4470807) %>% dplyr::arrange(Encounter_Type_Status)
+```
+
+
+# Merge Clustering Data and Multinomial Data
+
+```{r}
+data_final <- merge(data_mult, data_clust, by = "Patient_ID_mod")
+head(data_final)
+```
+
+```{r}
+write.csv(data_final, "cleaned_data.csv",row.names = FALSE)
+```
+
+
+To delete below?
+
+## Modeling
+
+
+```{r}
+scaled_data <- scale(clustering_data) # scale the data
+```
+
+
+
+k-medioud
+https://www.statology.org/k-medoids-in-r/
+```{r}
+library(factoextra)
+library(cluster)
+
+#scaled_data
+```
+
+determine optimal number of clusters
+```{r}
+#fviz_nbclust(scaled_data, pam, method = 'wss', k.max = 8)
+```
+
+```{r}
+#gap_stat <- clusGap(scaled_data, FUN = pam, K.max = 20, B = 50)
+
+#fviz_gap_stat(gap_stat)
+
+
+```
+
+
+
+```{r}
+pamx <- pam(data_clust, 3, metric = 'euclidean', stand = TRUE) # Try True and remove scaling before
+```
+
+```{r}
+summary(pamx)
+```
+
+```{r}
+plot(pamx)
+```
+
+
+
+# K-Mediod with 4 Clusters looking at Primary Care Visits and Emergency Room Visits
+```{r}
+pamx$medoids
+```
+
+
+```{r}
+fviz_cluster(pamx, scaled_data, geom = 'point', repel = FALSE, show.clust.cent = TRUE)
+```
+
+
+## Next Steps
+Place the cluster back into the data and perform multinomial regression to determine what predictors are the best predictors for each grouping (age, gender, insurance provider, etc)

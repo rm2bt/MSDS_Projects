@@ -1,0 +1,625 @@
+---
+title: "UVA Health Capstone"
+author: "Rehan Merchant, Luke Ford, Avinaash Pavuloori, Ryan Williams"
+date: "2/16/2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5.5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "49%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=TRUE)      # show R messages
+```
+
+```{r}
+# load required libraries
+library(tidyverse)
+library(ISLR)
+library(boot)
+library(caret)
+library(MASS)
+library(class)
+library(lubridate)
+library(dplyr)
+```
+
+```{r load-data, warning=FALSE, message=FALSE}
+# loading patient data
+cleaned_data <- read.csv("data/cleaned_data.csv") # change to match your directory
+```
+
+
+```{r}
+data <- cleaned_data 
+```
+
+```{r}
+data %>% dplyr::filter(Elixhauser ==0)
+```
+
+
+```{r}
+data %>%  count(Elixhauser)
+```
+
+
+
+```{r}
+head(data)
+```
+
+
+
+
+
+### Clustering
+```{r}
+data_clust <- data %>% dplyr::select(Patient_ID_mod, PC_Visits, PC_Encounters, ED_Visits) %>% 
+  column_to_rownames('Patient_ID_mod')
+
+head(data_clust)
+```
+
+
+
+k-medioud
+https://www.statology.org/k-medoids-in-r/
+```{r}
+library(factoextra)
+library(cluster)
+
+#scaled_data
+```
+
+determine optimal number of clusters
+```{r}
+sample_data <- sample_n(data_clust, 20000)
+sample_data
+```
+
+
+```{r}
+fviz_nbclust(sample_data, pam, method = 'wss', k.max = 10)
+```
+
+
+```{r}
+pamx <- pam(data_clust, 6, metric = 'euclidean', stand = TRUE) 
+```
+
+```{r}
+summary(pamx)
+```
+
+```{r}
+plot(pamx)
+```
+
+
+
+# K-Mediod with 6 Clusters looking at Primary Care Visits and Emergency Room Visits
+```{r}
+pamx$medoids
+```
+
+
+```{r}
+fviz_cluster(pamx, data_clust, geom = 'point', repel = FALSE, show.clust.cent = TRUE)
+```
+
+
+```{r}
+mult_data <- cbind(data, cluster = pamx$cluster)
+```
+
+```{r}
+head(mult_data)
+```
+
+```{r}
+colnames(mult_data)
+```
+
+
+## Multinomial Regression
+
+```{r}
+mult_data <- mult_data %>% dplyr::select(-PT_RACE, -cancel_reason_bucket, -PC_Visits, -PC_Encounters, -ED_Visits)
+                                         
+
+head(mult_data)
+```
+
+Do we need to balance the data and how would we go about that
+```{r}
+mult_data %>% count(cluster) %>% arrange(cluster) 
+```
+## Multinomial
+# https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+# https://www.analyticsvidhya.com/blog/2016/02/multinomial-ordinal-logistic-regression/ #difference between multinomial and ordered
+
+
+
+
+
+
+
+
+
+
+
+##### Clustering levels
+
+
+```{r}
+mult_data$cluster <- as.factor(mult_data$cluster)
+```
+
+
+```{r}
+mult_data$cluster <- dplyr::recode(mult_data$cluster, '3' = 'Annual', '5' = 'Minimal', '6' = 'Elevated', '4' = 'High', '2' = 'ED Usage', '1' = 'High ED Usage')
+levels(mult_data$cluster)
+```
+
+```{r}
+mult_data$cluster <- relevel(mult_data$cluster, "Annual")
+#mult_data$cluster <- ordered(mult_data$cluster, levels = c('Annual', 'Minimal', 'Elevated', 'High', 'ED Usage', 'High ED Usage'))
+levels(mult_data$cluster)
+```
+
+```{r}
+head(mult_data)
+```
+
+
+#### Changing Data Types
+```{r}
+# ENC_NO - Encounter number shouldnt have to do anything
+# sk_Fact_Pt_Enc_Clrt_mod - Not sure of meaning all are Na's so far
+#mult_data$Patient_ID_mod <- as.factor(mult_data$Patient_ID_mod)
+mult_data$insurance_buckets <- as.factor(mult_data$insurance_buckets)
+mult_data$Clrt_Sex <- as.factor(mult_data$Clrt_Sex)
+mult_data$PT_RACE <- as.factor(mult_data$race_bucket)
+#mult_data$Clrt_Ethnic <- as.factor(mult_data$Clrt_Ethnic)
+mult_data$lang_buckets <- as.factor(mult_data$lang_buckets)
+```
+
+
+
+##### Insurance Buckets
+```{r}
+mult_data %>% count(insurance_buckets)
+```
+We are going to set the level at private since that is the majority
+```{r}
+mult_data$insurance_buckets <- relevel(mult_data$insurance_buckets, "Private")
+levels(mult_data$insurance_buckets)
+```
+
+```{r}
+require(nnet)
+insurance_model <- multinom(cluster ~ insurance_buckets, data = mult_data) # censored = FALSE?
+summary(insurance_model)
+```
+
+summary(multi.reg)
+
+tib <- tidy(multi.reg, conf.int = TRUE, exponentiate = TRUE)
+
+odds_ratios <- exp(coef(multi.reg))
+odds_ratios <- t(odds_ratios)
+
+write.csv(tib, "2022_3_31_Multinomial_output.csv")
+write.csv(odds_ratios, "2022_3_31_Odds_ratios.csv")
+
+
+```{r}
+library(broom)
+tib <- tidy(insurance_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(insurance_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "insurance_output.csv")
+write.csv(odds_ratios, "insurance_Odds_ratios.csv")
+```
+
+
+##### Sex
+```{r}
+mult_data %>% count(Clrt_Sex)
+```
+Even though there are more females than males, we will set males as the level since it is industry standard
+```{r}
+mult_data$Clrt_Sex <- relevel(mult_data$Clrt_Sex, "Male")
+levels(mult_data$Clrt_Sex)
+```
+
+
+```{r}
+sex_model <- multinom(cluster ~ Clrt_Sex, data = mult_data) # censored = FALSE?
+summary(sex_model)
+```
+
+```{r}
+tib <- tidy(sex_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(sex_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "sex_output.csv")
+write.csv(odds_ratios, "sex_Odds_ratios.csv")
+```
+
+##### Race
+```{r}
+mult_data %>% count(race_bucket) %>% arrange(n)
+```
+We are going to set the level at white and then descending order followed by other and unknown might want to make these grouping more concise
+```{r}
+mult_data$race_bucket <- relevel(mult_data$PT_RACE, "White")
+levels(mult_data$race_bucket)
+```
+
+```{r}
+race_model <- multinom(cluster ~ race_bucket, data = mult_data) # censored = FALSE?
+summary(race_model)
+```
+
+```{r}
+tib <- tidy(race_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(race_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "race_output.csv")
+write.csv(odds_ratios, "race_Odds_ratios.csv")
+```
+
+##### Language
+
+```{r}
+mult_data %>% count(lang_buckets)
+```
+We are going to set the level at english since that is the majority
+```{r}
+mult_data$lang_buckets <- relevel(mult_data$lang_buckets, "English")
+levels(mult_data$lang_buckets)
+```
+
+```{r}
+language_model <- multinom(cluster ~ lang_buckets, data = mult_data) # censored = FALSE?
+summary(language_model)
+```
+
+
+```{r}
+tib <- tidy(language_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(language_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "language_output.csv")
+write.csv(odds_ratios, "language_Odds_ratios.csv")
+```
+
+
+
+
+##### Age
+
+```{r}
+head(mult_data)
+```
+
+
+```{r}
+mult_data %>% count(Age_mod)
+```
+
+
+```{r}
+age_model <- multinom(cluster ~ Age_mod, data = mult_data) # censored = FALSE?
+summary(age_model)
+```
+
+
+```{r}
+tib <- tidy(age_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(age_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "age_output.csv")
+write.csv(odds_ratios, "age_Odds_ratios.csv")
+```
+
+
+
+##### Elixhauser
+
+```{r}
+head(mult_data)
+```
+
+
+```{r}
+mult_data %>% count(Elixhauser)
+```
+
+
+```{r}
+elix_model <- multinom(cluster ~ Elixhauser, data = mult_data) # censored = FALSE?
+summary(elix_model)
+```
+
+
+```{r}
+tib <- tidy(elix_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(elix_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "elix_output.csv")
+write.csv(odds_ratios, "elix_Odds_ratios.csv")
+```
+
+
+
+
+
+## Registries
+
+```{r}
+colnames(mult_data)
+```
+
+```{r}
+mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA <- as.factor(mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA)
+```
+
+
+```{r}
+mult_data %>% count(ADULT_PALLIATIVE_CARE_REGISTRY_UVA)
+```
+
+```{r}
+mult_data$OBESITY_REGISTRY <- factor(mult_data$OBESITY_REGISTRY, ordered = FALSE)
+```
+
+
+```{r}
+mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA <- relevel(mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA,'0')
+levels(mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA)
+```
+
+```{r}
+ADULT_PALLIATIVE_CARE_REGISTRY_UVA_model <- multinom(cluster ~ ADULT_PALLIATIVE_CARE_REGISTRY_UVA, data = mult_data) # censored = FALSE?
+summary(ADULT_PALLIATIVE_CARE_REGISTRY_UVA_model)
+```
+
+
+```{r}
+tib <- tidy(ADULT_PALLIATIVE_CARE_REGISTRY_UVA_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+```{r}
+odds_ratios <- exp(coef(ADULT_PALLIATIVE_CARE_REGISTRY_UVA_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "ADULT_PALLIATIVE_CARE_REGISTRY_UVA_output.csv")
+write.csv(odds_ratios, "ADULT_PALLIATIVE_CARE_REGISTRY_UVAY_Odds_ratios.csv")
+```
+
+
+
+                                        High ED          ED     
+ADULT_PALLIATIVE_CARE_REGISTRY_UVA1    25.89871692   10.5925716        990 people
+ANESTHESIA_RECORD_REGISTRY1             4.33852188    2.2058119        7449 people
+ASTHMA_REGISTRY1                        2.75557104    1.2720313        3349 people
+BEWELL_REGISTRY_UVA1                    0.04589571    0.1880147        998 people
+CANCER_POPULATION_REGISTRY1             1.08080390    0.9402529        3557 people   
+CHRONIC_KIDNEY_DISEASE_REGISTRY1        7.12957211    2.7164066        2058 people   High - 6.3175579
+CHRONIC_OPIOID_USE_REGISTRY_UVA1       10.40804382    3.0107448        1264 people   High - 15.5432767
+CONGESTIVE_HEART_FAILURE_REGISTRY1     11.02194665    3.8039949        1846 people   High - 7.6757659
+CONTROLLED_SUBSTANCE_REGISTRY_UVA1     10.75710573    3.007643         1278 people   High - 15.5340331
+COPD_REGISTRY1                          6.94158028    2.2637946        1756 people   High - 5.723869
+CORONARY_ARTERY_DISEASE_REGISTRY1       4.14017423    1.986999         2332 people   High - 4.0333003
+CYSTIC_FIBROSIS_REGISTRY1               5.13524157    2.5498316         10 people    
+DIABETES_REGISTRY1                      3.57405154    1.6360425        6382 people   High - 5.2377031
+HYPERTENSION_REGISTRY1                  2.44913483    1.2137518        13339 people  High - 4.835082
+OSTEOPOROSIS_REGISTRY1                  1.3180054     2.218836        ~4000 people
+LUNG_CANCER_SCREENING_REGISTRY_UVA1     1.1784858     2.5451434       ~1000 people
+OBESITY_REGISTRY1                       2.1325935     3.6411269       ~19000 people   High - 1.5344487
+PREDIABETES_REGISTRY1                   1.176771      1.7636510  
+TOBACCO_REGISTRY1                       2.3755756     1.4360796       ~10000 people   High - 1.416821
+
+
+
+
+###############################################################################
+
+
+```{r}
+mult_data$ASTHMA_REGISTRY <- as.factor(mult_data$ASTHMA_REGISTRY)
+mult_data$CONGESTIVE_HEART_FAILURE_REGISTRY <- as.factor(mult_data$CONGESTIVE_HEART_FAILURE_REGISTRY)
+mult_data$COPD_REGISTRY <- as.factor(mult_data$COPD_REGISTRY)
+mult_data$CHRONIC_OPIOID_USE_REGISTRY_UVA <- factor(mult_data$CHRONIC_OPIOID_USE_REGISTRY_UVA, ordered = FALSE)
+mult_data$HYPERTENSION_REGISTRY <- factor(mult_data$HYPERTENSION_REGISTRY, ordered = FALSE)
+mult_data$OBESITY_REGISTRY <- factor(mult_data$OBESITY_REGISTRY, ordered = FALSE)
+mult_data$TOBACCO_REGISTRY <- as.factor(mult_data$TOBACCO_REGISTRY)
+mult_data$PREDIABETES_REGISTRY <- factor(mult_data$PREDIABETES_REGISTRY, ordered = FALSE)
+
+mult_data$BEWELL_REGISTRY_UVA <- factor(mult_data$BEWELL_REGISTRY_UVA, ordered = FALSE)
+mult_data$CHRONIC_KIDNEY_DISEASE_REGISTRY <- factor(mult_data$CHRONIC_KIDNEY_DISEASE_REGISTRY, ordered = FALSE)
+mult_data$ANESTHESIA_RECORD_REGISTRY <- factor(mult_data$ANESTHESIA_RECORD_REGISTRY, ordered = FALSE)
+mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA <- factor(mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA, ordered = FALSE)
+mult_data$DIABETES_REGISTRY <- factor(mult_data$DIABETES_REGISTRY, ordered = FALSE)
+```
+
+
+
+
+```{r}
+mult_data$ASTHMA_REGISTRY <- relevel(mult_data$ASTHMA_REGISTRY, '0')
+mult_data$CONGESTIVE_HEART_FAILURE_REGISTRY <- relevel(mult_data$CONGESTIVE_HEART_FAILURE_REGISTRY, '0')
+mult_data$COPD_REGISTRY <- relevel(mult_data$COPD_REGISTRY, '0')
+mult_data$CHRONIC_OPIOID_USE_REGISTRY_UVA <- relevel(mult_data$CHRONIC_OPIOID_USE_REGISTRY_UVA, '0')
+mult_data$HYPERTENSION_REGISTRY <- relevel(mult_data$HYPERTENSION_REGISTRY, '0')
+mult_data$OBESITY_REGISTRY <- relevel(mult_data$OBESITY_REGISTRY, '0')
+mult_data$TOBACCO_REGISTRY <- relevel(mult_data$TOBACCO_REGISTRY, '0')
+mult_data$PREDIABETES_REGISTRY <- relevel(mult_data$PREDIABETES_REGISTRY, '0')
+
+mult_data$BEWELL_REGISTRY_UVA <- relevel(mult_data$BEWELL_REGISTRY_UVA, '0')
+mult_data$CHRONIC_KIDNEY_DISEASE_REGISTRY <- relevel(mult_data$CHRONIC_KIDNEY_DISEASE_REGISTRY, '0')
+mult_data$ANESTHESIA_RECORD_REGISTRY <- relevel(mult_data$ANESTHESIA_RECORD_REGISTRY, '0')
+mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA <- relevel(mult_data$ADULT_PALLIATIVE_CARE_REGISTRY_UVA, '0')
+mult_data$DIABETES_REGISTRY <- relevel(mult_data$DIABETES_REGISTRY, '0')
+```
+
+```{r}
+#split data into train, test
+
+index <- createDataPartition(mult_data$cluster, p = .70, list = FALSE)
+train <- mult_data[index,]
+test <- mult_data[-index,]
+
+#split test into test and validate
+
+index <- createDataPartition(test$cluster, p = .50, list = FALSE)
+test <- test[index,]
+validate <- test[-index,]
+
+```
+
+
+
+```{r}
+#releveling our subsets - think this is done in an earier step so might not work
+train$cluster <- relevel(mult_data$cluster, "Annual")
+test$cluster <- relevel(mult_data$cluster, "Annual")
+validate$cluster <- relevel(mult_data$cluster, "Annual")
+
+```
+
+```{r}
+#train
+# Training the multinomial model
+multinom_model <- multinom(cluster ~ insurance_buckets + Elixhauser + Age_mod + race_bucket + lang_buckets + Clrt_Sex +# +
+                             HYPERTENSION_REGISTRY + CHRONIC_OPIOID_USE_REGISTRY_UVA + OBESITY_REGISTRY + PREDIABETES_REGISTRY + TOBACCO_REGISTRY + CONGESTIVE_HEART_FAILURE_REGISTRY + COPD_REGISTRY, data = train) # ASTHMA_REGISTRY, 
+                             #+ CONGESTIVE_HEART_FAILURE_REGISTRY + COPD_REGISTRY + CHRONIC_OPIOID_USE_REGISTRY_UVA +
+                             #HYPERTENSION_REGISTRY + OBESITY_REGISTRY + TOBACCO_REGISTRY + PREDIABETES_REGISTRY, data = train)
+# Checking the model
+summary(multinom_model)
+```
+
+
+
+```{r}
+z <- summary(multinom_model)$coefficients/summary(multinom_model)$standard.errors
+p <- (1 - pnorm(abs(z),0,1)) * 2
+p
+```
+
+
+```{r}
+tib <- tidy(multinom_model, conf.int = TRUE, exponentiate = TRUE)
+tib
+```
+
+
+
+
+```{r}
+odds_ratios <- exp(coef(multinom_model))
+odds_ratios <- t(odds_ratios)
+odds_ratios
+```
+
+```{r}
+write.csv(tib, "final_mult_output.csv")
+write.csv(odds_ratios, "final_mult_Odds_ratios.csv")
+```
+
+
+valdiate
+```{r}
+library(caret)
+# Predicting the values for validation dataset
+validate$ClusterPredicted <- predict(multinom_model, newdata = validate, "class")
+
+
+confusionMatrix(data = validate$ClusterPredicted, reference = validate$cluster)
+```
+
+
+
+
+
+test
+
+```{r}
+library(caret)
+# Predicting the values for test dataset
+test$ClusterPredicted <- predict(multinom_model, newdata = test, "class")
+
+confusionMatrix(data = test$ClusterPredicted, reference = test$cluster)
+```
+
+```{r}
+head(round(fitted(mult_model), 2),50)
+```
+
+
+###################################################################################
