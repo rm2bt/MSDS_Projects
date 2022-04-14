@@ -1,0 +1,873 @@
+---
+title: "Disaster Relief Project: Part I"
+author: "Rehan Merchant rm2bt"
+date: "`r format(Sys.Date(), '%b %d, %Y')`"
+output:
+  html_document:
+    number_sections: true    
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: espresso    
+# You can make the format personal - this will get you started:  
+# https://bookdown.org/yihui/rmarkdown/html-document.html#appearance_and_style    
+---
+
+<!--- Below are global settings for knitr. You can override any of them by adding the changes to individual chunks --->
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(error=TRUE,        # Keep compiling upon error
+                      collapse=FALSE,    # collapse by default
+                      echo=TRUE,         # echo code by default
+                      comment = "#>",    # change comment character
+                      fig.width = 5.5,     # set figure width
+                      fig.align = "center",# set figure position
+                      out.width = "49%", # set width of displayed images
+                      warning=TRUE,      # show R warnings
+                      message=TRUE)      # show R messages
+```
+
+<!--- Change font sizes (or other css modifications) --->
+<style>
+h1.title {
+  font-size: 2.2em; /* Title font size */
+}
+h1 {
+  font-size: 2em;   /* Header 1 font size */
+}
+h2 {
+  font-size: 1.5em;
+}
+h3 { 
+  font-size: 1.2em;
+}
+pre {
+  font-size: 0.8em;  /* Code and R output font size */
+}
+</style>
+
+
+
+**SYS 6018 | Spring 2021 | University of Virginia **
+
+*******************************************
+
+# Introduction 
+In 2010 an earthquake hit Haiti and caused a lot of destruction in the country. Many of the residents of Haiti were displaced and cut off from food and water sources. Communication and roads were also effected by the earthquake. Because of this, officials had trouble locating displaced citizens and getting aid to them. In order to solve this problem, an aircraft was flown above to collect images of the ground. This would help identify shelters that have been created by displaced individuals. Because, this was time sensitive, the images were ran through data mining algorithms to search the images quickly and effectively in order to locate those displaced individuals. We are attempting to simulate what happened in 2010 by testing different models on the imagery collected from the disaster in 2010. After testing each of these models, we will compare and come up with which model would produce the most accurate results in a timely manner. 
+
+# Training Data / EDA
+
+Load data, explore data, etc. 
+
+```{r load-packages, warning=FALSE, message=FALSE}
+# Load Required Packages
+library(tidyverse)
+library(caret)
+library(MASS)
+library(boot)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(GGally)
+library(ROCR)
+library(MLeval)
+library(pROC)
+library(glmnet)
+library(yardstick)
+#load data
+data <- read.csv('HaitiPixels.csv')
+attach(data)
+data$BlueTarp <- str_detect(Class,"Blue Tarp")
+data$BlueTarp <- factor(data$BlueTarp)
+pairs(BlueTarp~ Red + Green + Blue, data = data)
+#positive correlation between the variables but none between BlueTarp
+#made blue tarp a separate variable and made it a binary 2 class variable
+```
+
+
+# Model Training
+
+## Set-up 
+```{r}
+set.seed(1)
+index <- createDataPartition(y = data$BlueTarp, p =0.5, list = F)
+train <- data[index,]
+test <- data[-index,]
+
+```
+
+## Logistic Regression
+```{r}
+glm.fits <- glm(BlueTarp ~ Red + Green + Blue, family = 'binomial', data = train)
+summary(glm.fits)
+#all predictors are significant except intercept
+
+#crossval
+ctrl <- trainControl(method='cv',
+                     number=10,
+                     savePredictions = T)
+glmmod <- train(BlueTarp~ .-Class,
+                data=train,
+                method='glm',
+                trControl=ctrl)
+glmmod$results
+
+#predict
+glm.predict <- predict(glm.fits, newdata = test, type="response")
+
+#confusionMatrix
+
+confusionMatrix(data = as.factor(glm.predict>=0.5), reference = test$BlueTarp)
+
+
+
+#proc
+my_roc_glm <- roc(test$BlueTarp,glm.predict)
+plot(my_roc_glm)
+#performance values
+auc.glm <- auc(my_roc_glm)
+coords(my_roc_glm,'best',ret = 'threshold')
+coords(my_roc_glm,'best', ret = 'accuracy')
+coords(my_roc_glm,'best', ret = 'tpr')
+coords(my_roc_glm,'best', ret = 'fpr')
+coords(my_roc_glm,'best', ret = 'precision')
+
+
+```
+
+## LDA
+```{r}
+lda.fits <- lda(BlueTarp ~ Red + Green + Blue, family = 'binomial', data=train)
+
+#crossval
+set.seed(105)
+ctrl <- trainControl(method='cv',
+                     number=10,
+                     savePredictions = T)
+ldamod <- train(BlueTarp~ .-Class,
+                data=train,
+                method='lda',
+                trControl=ctrl)
+ldamod$results
+
+#predict
+lda.predict <- predict(lda.fits, newdata = test, family = 'binomial')
+
+#confusionMatrix
+confusionMatrix(data = lda.predict$class, reference = test$BlueTarp)
+
+#roc curve
+#proc
+my_roc_lda <- roc(test$BlueTarp,lda.predict$x)
+plot(my_roc_lda)
+#performance table values
+auc(my_roc_lda)
+coords(my_roc_lda,'best', ret = 'threshold')
+coords(my_roc_lda,'best', ret = 'accuracy')
+coords(my_roc_lda,'best', ret = 'tpr')
+coords(my_roc_lda,'best', ret = 'fpr')
+coords(my_roc_lda,'best', ret = 'precision')
+
+
+```
+
+## QDA
+```{r}
+qda.fits <- qda(BlueTarp ~ Red + Green +Blue, family = 'binomial', data=train)
+
+#crossval
+set.seed(106)
+ctrl <- trainControl(method='cv',
+                     number=10,
+                     savePredictions = T)
+qdamod <- train(BlueTarp~ .-Class,
+                data=train,
+                method='qda',
+                trControl=ctrl)
+qdamod$results
+
+#predict
+qda.predict <- predict(qda.fits, newdata = test, family = 'binomial')
+
+#confusion matrix
+confusionMatrix(reference = test$BlueTarp, data = qda.predict$class)
+
+
+#roc curve
+#proc
+my_roc_qda <- roc(test$BlueTarp,as.numeric(qda.predict$class))
+plot(my_roc_qda)
+#performance table values
+auc(my_roc_qda)
+coords(my_roc_qda,'best',ret = 'threshold')
+coords(my_roc_qda,'best', ret = 'accuracy')
+coords(my_roc_qda,'best', ret = 'tpr')
+coords(my_roc_qda,'best', ret = 'fpr')
+coords(my_roc_qda,'best', ret = 'precision')
+
+```
+
+## KNN
+```{r}
+knn.fits <- knn3(BlueTarp ~ Red + Green +Blue,data = train)
+
+#cross val
+ctrl <- trainControl(method = 'cv', number = 10, savePredictions = T)
+knnmod <- train(BlueTarp~ Red + Green + Blue, method = 'knn', data = train, trControl = ctrl)
+plot(knnmod)
+#best k val
+knnBestTune <- knnmod$bestTune
+
+knn.fits.besttune <- knn3(BlueTarp ~ Red + Green +Blue,data = train, k = knnBestTune)
+
+#predict
+knn.predict <- predict(knn.fits.besttune, newdata = test, type = 'class')
+
+
+#confusion matrix
+confusionMatrix(table(predicted = knn.predict, 
+                      reference = test$BlueTarp))
+
+#roc curve
+#proc
+my_roc_knn <- roc(test$BlueTarp,as.numeric(knn.predict))
+plot(my_roc_knn)
+#performance table values
+auc(my_roc_knn)
+coords(my_roc_knn,'best',ret = 'threshold')
+coords(my_roc_knn,'best', ret = 'accuracy')
+coords(my_roc_knn,'best', ret = 'tpr')
+coords(my_roc_knn,'best', ret = 'fpr')
+coords(my_roc_knn,'best', ret = 'precision')
+
+
+
+```
+
+### Tuning Parameter $k$
+The tuning parameter that we selected was calculated by doing k fold cross validation.
+The tuning parameter we selected was k = 7
+
+
+
+How were tuning parameter(s) selected? What value is used? Plots/Tables/etc.
+
+## Penalized Logistic Regression (ElasticNet)
+```{r}
+#Elastic net
+fmla <- lm(formula(BlueTarp~.-Class),
+             data=train)
+#design matrix
+x=model.matrix(fmla, data = train)[,-1]
+y= train$BlueTarp
+
+#crossval
+set.seed(123)
+model.elastic <- train(
+  BlueTarp ~ Red + Green +Blue, data = train, method = 'glmnet', trControl = trainControl('cv', number = 10), tuneLength = 10
+)
+#best Tuning value
+model.elastic$bestTune
+coef(model.elastic$finalModel, model.elastic$bestTune$lambda)
+
+#test
+test.elastic <- model.matrix(fmla, data=test)[,-1]
+predictions.elastic <- predict(model.elastic,newdata = test)
+
+#confusion matrix
+confusionMatrix(table(predicted = predictions.elastic, 
+                      reference = test$BlueTarp))
+
+#roc curve
+#proc
+my_roc_elastic <- roc(test$BlueTarp,as.numeric(predictions.elastic))
+plot(my_roc_elastic)
+#performance table values
+auc(my_roc_elastic)
+coords(my_roc_elastic,'best',ret = 'threshold')
+coords(my_roc_elastic,'best', ret = 'accuracy')
+coords(my_roc_elastic,'best', ret = 'tpr')
+coords(my_roc_elastic,'best', ret = 'fpr')
+coords(my_roc_elastic,'best', ret = 'precision')
+
+```
+## Random Forest (Part 2)
+```{r}
+library(randomForest)
+rf.data <- randomForest(BlueTarp~ Red + Green + Blue, data = train, mtry=3, importance = TRUE)
+rf.data
+#crossval
+set.seed(127)
+
+ctrl <- trainControl(method='cv',
+                     number=10,
+                     savePredictions = TRUE,
+                     returnResamp = 'all')
+rfmod <- train(BlueTarp~ Red + Green + Blue,
+                data=train,
+                method='rf',
+                trControl=ctrl,
+               importance=TRUE)
+rfmod
+#mtry = 2 tuning parameter
+rfmodBestTune <- rfmod$bestTune
+rfmodBestTune
+
+#prediction
+rf.predict <- predict(rf.data, newdata = test, family = 'binomial', mtry = rfmodBestTune, type="response")
+rf.predict <- as.data.frame(rf.predict)
+rf.predict <- as.factor(rf.predict$rf.predict)
+rf.numeric <- as.numeric(rf.predict)
+
+#confusion matrix
+confusionMatrix(reference = test$BlueTarp, data = rf.predict)
+
+#roc
+rocRF <- roc(test$BlueTarp,rf.numeric)
+plot(rocRF)
+#performance table values
+auc(rocRF)
+coords(rocRF,'best', ret = 'threshold')
+coords(rocRF,'best', ret = 'accuracy')
+coords(rocRF,'best', ret = 'tpr')
+coords(rocRF,'best', ret = 'fpr')
+coords(rocRF,'best', ret = 'precision')
+```
+
+## SVM (Part 2)
+```{r}
+library(e1071)
+#linear
+svmfit <- svm(formula = BlueTarp~ Red + Green + Blue, data = train, kernel ="linear", cost = 10)
+svmfit$index
+summary(svmfit)
+svmfit <- svm(formula = BlueTarp~ Red + Green + Blue, data = train, kernel ="linear", cost = 0.1)
+summary(svmfit)
+tune.out <- tune(svm,BlueTarp~ Red + Green + Blue, data = train, kernel ="linear", ranges = list(cost=c(0.001,0.01,0.1,1,5,10,100,1000)))
+summary(tune.out)
+#best tune
+svmLinearBestTuneCost <- tune.out$best.parameters$cost
+svmLinearBestTuneCost
+
+bestmod <- tune.out$best.model
+summary(bestmod)
+#predict
+ypred <- predict(bestmod,test)
+#confusion matrix
+confusionMatrix(data = ypred, reference = test$BlueTarp)
+
+#radial
+svmfitradial <- svm(formula = BlueTarp~ Red + Green + Blue, data = train, type= "C-classification", kernel ="radial")
+summary(svmfitradial)
+tune.radial <- tune(svm,BlueTarp~ Red + Green + Blue, data = train, kernel ="radial",ranges=list(cost=c(0.1,1,10,100,1000)))
+summary(tune.radial)
+
+svmRadialBestTuneCost <- tune.radial$best.parameters$cost
+
+#polynomial
+svmfitpoly <- svm(formula = BlueTarp~ Red + Green + Blue, data = train, type= "C-classification", kernel ="polynomial")
+summary(svmfitpoly)
+tune.poly <- tune(svm,BlueTarp~ Red + Green + Blue, data = train, kernel ="polynomial",ranges=list(cost=c(0.1,1,10,100,1000)))
+summary(tune.poly)
+svmPolyBestTuneCost <- tune.poly$best.parameters$cost
+
+#sigmoid
+svmsigmoid <- svm(formula = BlueTarp~ Red + Green + Blue, data = train, type= "C-classification", kernel ="sigmoid")
+summary(svmsigmoid)
+tune.sigmoid <- tune(svm,BlueTarp~ Red + Green + Blue, data = train, kernel ="sigmoid",ranges=list(cost=c(0.1,1,10,100,1000)))
+summary(tune.sigmoid)
+svmSigmoidBestTuneCost <- tune.sigmoid$best.parameters$cost
+
+#table comparing values of best tune performance
+TunePerformanceList <- list(tune.out$best.performance,tune.radial$best.performance,tune.poly$best.performance,tune.sigmoid$best.performance)
+
+TunePerformanceDF <- as.data.frame(TunePerformanceList)
+colnames(TunePerformanceDF) <- c('Linear','Radial Basis','Polynomial','Sigmoid')
+TunePerformanceDF <- data.frame(TunePerformanceDF, row.names = "Best Performance (Error Rate)")
+TunePerformanceDF
+#radial has a lowest best performance (error rate). go with radial model
+
+bestmod <- tune.radial$best.model
+summary(bestmod)
+#predict
+ypred <- predict(bestmod,test,decision.values = TRUE)
+fitted <- attributes(ypred)$decision.values
+#confusion matrix
+confusionMatrix(data = ypred, reference = test$BlueTarp)
+
+#roc
+my_roc_svm <- roc(test$BlueTarp,fitted)
+plot(my_roc_svm)
+#performance table values
+auc(my_roc_svm)
+coords(my_roc_svm,'best', ret = 'threshold')
+coords(my_roc_svm,'best', ret = 'accuracy')
+coords(my_roc_svm,'best', ret = 'tpr')
+coords(my_roc_svm,'best', ret = 'fpr')
+coords(my_roc_svm,'best', ret = 'precision')
+```
+
+### Tuning Parameters
+
+**NOTE: PART II same as above plus add Random Forest and SVM to Model Training.**
+
+## Threshold Selection
+
+We were able to find the best threshold for each model through the pROC library using the coords function. The threshold that we ended up using was selected using this process. It proved very effective since all of our models had a high accuracy. 
+
+# Results (Cross-Validation)
+```{r}
+#glm
+list.glm <- list('n/a', as.numeric(my_roc_glm$auc),as.numeric(coords(my_roc_glm,'best',ret = 'threshold')),as.numeric(coords(my_roc_glm,'best', ret = 'accuracy')),as.numeric(coords(my_roc_glm,'best', ret = 'tpr')),as.numeric(coords(my_roc_glm,'best', ret = 'fpr')),as.numeric(coords(my_roc_glm,'best', ret = 'precision')))
+df_glm <- as.data.frame(list.glm)
+df_glm <- data.frame(df_glm, row.names = 'Log Reg')
+colnames(df_glm) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_glm
+
+#lda
+list.lda <- list(list('n/a', as.numeric(my_roc_lda$auc),as.numeric(coords(my_roc_lda,'best',ret = 'threshold')),as.numeric(coords(my_roc_lda,'best', ret = 'accuracy')),as.numeric(coords(my_roc_lda,'best', ret = 'tpr')),as.numeric(coords(my_roc_lda,'best', ret = 'fpr')),as.numeric(coords(my_roc_lda,'best', ret = 'precision'))))
+
+df_lda <- as.data.frame(list.lda)
+df_lda <- data.frame(df_lda,row.names = 'LDA')
+colnames(df_lda) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_lda
+
+#qda
+
+list.qda <- list(list('n/a', as.numeric(my_roc_qda$auc),as.numeric(coords(my_roc_qda,'best',ret = 'threshold')),as.numeric(coords(my_roc_qda,'best', ret = 'accuracy')),as.numeric(coords(my_roc_qda,'best', ret = 'tpr')),as.numeric(coords(my_roc_qda,'best', ret = 'fpr')),as.numeric(coords(my_roc_qda,'best', ret = 'precision'))))
+
+df_qda <- as.data.frame(list.qda)
+df_qda <- data.frame(df_qda,row.names = 'QDA')
+colnames(df_qda) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_qda
+
+#knn
+list.knn <- list(list(as.numeric(knnBestTune), as.numeric(my_roc_knn$auc),as.numeric(coords(my_roc_knn,'best',ret = 'threshold')),as.numeric(coords(my_roc_knn,'best', ret = 'accuracy')),as.numeric(coords(my_roc_knn,'best', ret = 'tpr')),as.numeric(coords(my_roc_knn,'best', ret = 'fpr')),as.numeric(coords(my_roc_knn,'best', ret = 'precision'))))
+
+df_knn <- as.data.frame(list.knn)
+df_knn <- data.frame(df_knn,row.names = 'KNN')
+colnames(df_knn) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_knn
+
+#elastic
+
+list.elastic <- list(list(model.elastic$bestTune$lambda, as.numeric(my_roc_elastic$auc),as.numeric(coords(my_roc_elastic,'best',ret = 'threshold')),as.numeric(coords(my_roc_elastic,'best', ret = 'accuracy')),as.numeric(coords(my_roc_elastic,'best', ret = 'tpr')),as.numeric(coords(my_roc_elastic,'best', ret = 'fpr')),as.numeric(coords(my_roc_elastic,'best', ret = 'precision'))))
+
+df_elastic <- as.data.frame(list.elastic)
+df_elastic <- data.frame(df_elastic,row.names = 'Penalized Log Reg')
+colnames(df_elastic) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_elastic
+
+#Part 2
+#random forest 
+list.rf <- list(list(rfmodBestTune, as.numeric(rocRF$auc),as.numeric(coords(rocRF,'best',ret = 'threshold')),as.numeric(coords(rocRF,'best', ret = 'accuracy')),as.numeric(coords(rocRF,'best', ret = 'tpr')),as.numeric(coords(rocRF,'best', ret = 'fpr')),as.numeric(coords(rocRF,'best', ret = 'precision'))))
+
+df_rf <- as.data.frame(list.rf)
+df_rf <- data.frame(df_rf,row.names = 'Random Forest')
+colnames(df_rf) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_rf
+
+
+#svm
+list.svmCost <- list(svmRadialBestTuneCost, as.numeric(my_roc_svm$auc),as.numeric(coords(my_roc_svm,'best',ret = 'threshold')),as.numeric(coords(my_roc_svm,'best', ret = 'accuracy')),as.numeric(coords(my_roc_svm,'best', ret = 'tpr')),as.numeric(coords(my_roc_svm,'best', ret = 'fpr')),as.numeric(coords(my_roc_svm,'best', ret = 'precision')))
+
+df_svmCost <- as.data.frame(list.svmCost)
+df_svmCost <- data.frame(df_svmCost,row.names = 'Support Vector Machine')
+colnames(df_svmCost) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_svmCost
+
+```
+
+** CV Performance Table Here**
+```{r}
+#Perf Table
+
+PerfTable <- rbind(df_glm,df_lda,df_qda,df_knn,df_elastic,df_rf,df_svmCost)
+colnames(PerfTable) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+
+PerfTable
+```
+
+
+
+# Conclusions
+
+### Conclusion \#1 
+After engineering and testing all the models, I have concluded that the KNN approach proved to have the best results. We were able to successfully predict Blue Tarps at a 99.7% accuracy.We calculated this accuracy by creating a confusion matrix which shows how our model predicted on the test data set and compared it to the actual values. 
+
+
+### Conclusion \#2
+After evaluating all the models, I concluded that KNN provided the best results but we also found other models that performed well. QDA and Elastic net had accuracy slightly lower than KNN but were more precise than KNN. I chose KNN over QDA and Elastic net because we were prioritizing accuracy in this simulation. 
+
+### Conclusion \#3
+I think the approach that I took would help save lives by being able to accurately predict where the displaced individuals are. All the models tested very well and tested very accurately. Being able to predict efficiently and accurately in this kind of situation is very important and the models I tested and ended up choosing to predict where the Blue Tents were showed these characteristics.  
+
+### Conclusion \#4
+One thing that I could do different that may improve results is to use a multinomial approach instead of binomial. I set my factor to a Boolean. It was either Blue Tarp or not Blue Tarp, even though the original data set had more than just Blue Tarp as a category. I think that this may help improve the overall prediction since it would be more representative of the real world. I think that the multinomial approach would work better than binomial.
+
+```{r, echo=FALSE}
+# knitr::knit_exit()    # ignore everything after this
+## Uncomment this line for Part I
+## You can remove the entire code chunk for Part II
+```
+
+
+# Hold-out Data / EDA
+
+Load data, explore data, etc. 
+```{r}
+proj_dir = "~/Desktop/Grad School/2021 Spring/SYS 6018/Project" # set the project directory where data is stored (relative path)
+#-- Get List of files in the zipped directory
+unzip(file.path(proj_dir, "Hold+Out+Data.zip"), list=TRUE)
+#-- Unzip all files into `project` directory
+unzip(file.path(proj_dir, "Hold+Out+Data.zip"), # path to zipped file
+exdir = proj_dir) # path to unzipped location
+
+read_lines(file.path(proj_dir, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
+n_max = 15)
+
+#orthovnir057_ROI_NON_Blue_Tarps
+ortho057_noblue = read_table(file.path(proj_dir, "orthovnir057_ROI_NON_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+ortho057_noblue$BlueTarp = 'FALSE'
+ortho057_noblue <- ortho057_noblue[, - c(1:7)]
+
+#orthovnir067_ROI_Blue_Tarps_data
+read_lines(file.path(proj_dir, "orthovnir067_ROI_Blue_Tarps_data.txt"),
+n_max = 15)
+
+orthovnir067_blue_tarps_data = read.delim(file.path(proj_dir,"orthovnir067_ROI_Blue_Tarps_data.txt"),
+header = TRUE) %>%
+  rename(Red=B1, Green=B2, Blue=B3)
+orthovnir067_blue_tarps_data$BlueTarp = 'TRUE'
+orthovnir067_blue_tarps_data <- orthovnir067_blue_tarps_data[,-c(1)]
+
+#orthovnir067_ROI_Blue_Tarps
+orthovnir067_BlueTarps = read_table(file.path(proj_dir, "orthovnir067_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir067_BlueTarps$BlueTarp <- 'TRUE'
+orthovnir067_BlueTarps<- orthovnir067_BlueTarps[, - c(1:7)]
+
+#orthovnir067_ROI_NOT_Blue_Tarps
+orthovnir067_NOT_Blue_Tarps = read_table(file.path(proj_dir, "orthovnir067_ROI_NOT_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir067_NOT_Blue_Tarps$BlueTarp <- 'FALSE'
+orthovnir067_NOT_Blue_Tarps <- orthovnir067_NOT_Blue_Tarps[,-c(1:7)]
+
+
+#orthovnir069_ROI_Blue_Tarps
+orthovnir069_Blue_Tarps = read_table(file.path(proj_dir, "orthovnir069_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir069_Blue_Tarps$BlueTarp <- 'TRUE'
+orthovnir069_Blue_Tarps <- orthovnir069_Blue_Tarps[,-c(1:7)]
+
+#orthovnir069_ROI_NOT_Blue_Tarps
+orthovnir069_Not_Blue_Tarps = read_table(file.path(proj_dir, "orthovnir069_ROI_NOT_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir069_Not_Blue_Tarps$BlueTarp <- 'FALSE'
+orthovnir069_Not_Blue_Tarps<- orthovnir069_Not_Blue_Tarps[,-c(1:7)]
+
+#orthovnir078_ROI_Blue_Tarps
+orthovnir078_Blue_Tarps = read_table(file.path(proj_dir, "orthovnir078_ROI_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir078_Blue_Tarps$BlueTarp <- 'TRUE'
+orthovnir078_Blue_Tarps<- orthovnir078_Blue_Tarps[,-c(1:7)]
+
+#orthovnir078_ROI_NON_Blue_Tarps
+orthovnir078_NON_Blue_Tarps = read_table(file.path(proj_dir, "orthovnir078_ROI_NON_Blue_Tarps.txt"),
+skip=7, col_types = cols(`;`="-", ID = "c")) %>%
+rename(Red=B1, Green=B2, Blue=B3)
+orthovnir078_NON_Blue_Tarps$BlueTarp <- 'FALSE'
+orthovnir078_NON_Blue_Tarps<- orthovnir078_NON_Blue_Tarps[,-c(1:7)]
+
+HoldOutData <- rbind(ortho057_noblue,orthovnir067_blue_tarps_data,orthovnir067_BlueTarps,orthovnir067_NOT_Blue_Tarps,orthovnir069_Blue_Tarps,orthovnir069_Not_Blue_Tarps,orthovnir078_Blue_Tarps,orthovnir078_NON_Blue_Tarps)
+
+
+HoldOutData$BlueTarp <- factor(HoldOutData$BlueTarp)
+HoldOutData$Red <- as.integer(HoldOutData$Red)
+HoldOutData$Green <- as.integer(HoldOutData$Green)
+HoldOutData$Blue <- as.integer(HoldOutData$Blue)
+
+```
+
+# Performance with Hold Out Data
+## Logistic Regression
+```{r}
+glm.fitsHoldOut <- glm(BlueTarp ~ Red + Green + Blue, family = 'binomial', data = data)
+
+
+glm.predictHoldOut <- predict(glm.fitsHoldOut, newdata = HoldOutData, type="response")
+#confusionMatrix NEED TO FIX THIS
+confusionMatrix(data = factor(glm.predictHoldOut>=0.5), reference = HoldOutData$BlueTarp)
+
+#proc
+my_roc_glmHoldOut <- roc(HoldOutData$BlueTarp,glm.predictHoldOut)
+plot(my_roc_glmHoldOut)
+#performance values
+auc.glmHoldOut <- auc(my_roc_glmHoldOut)
+coords(my_roc_glmHoldOut,'best',ret = 'threshold')
+coords(my_roc_glmHoldOut,'best', ret = 'accuracy')
+coords(my_roc_glmHoldOut,'best', ret = 'tpr')
+coords(my_roc_glmHoldOut,'best', ret = 'fpr')
+coords(my_roc_glmHoldOut,'best', ret = 'precision')
+
+
+
+```
+## LDA
+```{r}
+lda.fitsHoldOut <- lda(BlueTarp ~ Red + Green + Blue, family = 'binomial', data=data)
+
+
+lda.predictHoldOut <- predict(lda.fitsHoldOut, newdata = HoldOutData, family = 'binomial')
+
+#confusionMatrix
+confusionMatrix(data = lda.predictHoldOut$class, reference = HoldOutData$BlueTarp)
+
+#roc curve
+#proc
+my_roc_ldaHoldOut <- roc(HoldOutData$BlueTarp,lda.predictHoldOut$x)
+plot(my_roc_ldaHoldOut)
+#performance table values
+auc(my_roc_ldaHoldOut)
+coords(my_roc_ldaHoldOut,'best', ret = 'threshold')
+coords(my_roc_ldaHoldOut,'best', ret = 'accuracy')
+coords(my_roc_ldaHoldOut,'best', ret = 'tpr')
+coords(my_roc_ldaHoldOut,'best', ret = 'fpr')
+coords(my_roc_ldaHoldOut,'best', ret = 'precision')
+
+
+```
+
+
+
+
+
+
+
+
+## QDA
+```{r}
+qda.fitsHoldOut <- qda(BlueTarp ~ Red + Green +Blue, family = 'binomial', data=data)
+
+#predict
+qda.predictHoldOut <- predict(qda.fitsHoldOut, newdata = HoldOutData, family = 'binomial')
+
+#confusion matrix
+confusionMatrix(reference = HoldOutData$BlueTarp, data = qda.predictHoldOut$class)
+
+#roc curve
+#proc
+my_roc_qdaHoldOut <- roc(HoldOutData$BlueTarp,as.numeric(qda.predictHoldOut$class))
+plot(my_roc_qdaHoldOut)
+#performance table values
+auc(my_roc_qdaHoldOut)
+coords(my_roc_qdaHoldOut,'best',ret = 'threshold')
+coords(my_roc_qdaHoldOut,'best', ret = 'accuracy')
+coords(my_roc_qdaHoldOut,'best', ret = 'tpr')
+coords(my_roc_qdaHoldOut,'best', ret = 'fpr')
+coords(my_roc_qdaHoldOut,'best', ret = 'precision')
+
+```
+## KNN
+```{r}
+knn.fitsHoldOut <- knn3(BlueTarp ~ Red + Green +Blue,data = data, k = knnBestTune)
+
+
+#predict
+knn.predictHoldOut <- predict(knn.fitsHoldOut, newdata = HoldOutData, type = 'class')
+
+
+#confusion matrix
+confusionMatrix(table(predicted = knn.predictHoldOut, 
+                      reference = HoldOutData$BlueTarp))
+
+#roc curve
+#proc
+my_roc_knnHoldOut <- roc(HoldOutData$BlueTarp,as.numeric(knn.predictHoldOut))
+plot(my_roc_knnHoldOut)
+#performance table values
+auc(my_roc_knnHoldOut)
+coords(my_roc_knnHoldOut,'best',ret = 'threshold')
+coords(my_roc_knnHoldOut,'best', ret = 'accuracy')
+coords(my_roc_knnHoldOut,'best', ret = 'tpr')
+coords(my_roc_knnHoldOut,'best', ret = 'fpr')
+coords(my_roc_knnHoldOut,'best', ret = 'precision')
+
+
+```
+
+## Penalized Logistic Regression (ElasticNet)
+```{r}
+#Elastic net
+#model.elastic
+predictions.elasticHoldOut <- predict(model.elastic,newdata = HoldOutData)
+
+
+#confusion matrix
+confusionMatrix(table(predicted = predictions.elasticHoldOut, 
+                      reference = HoldOutData$BlueTarp))
+
+#roc curve
+#proc
+my_roc_elasticHoldOut <- roc(HoldOutData$BlueTarp,as.numeric(predictions.elasticHoldOut))
+plot(my_roc_elasticHoldOut)
+#performance table values
+auc(my_roc_elasticHoldOut)
+coords(my_roc_elasticHoldOut,'best',ret = 'threshold')
+coords(my_roc_elasticHoldOut,'best', ret = 'accuracy')
+coords(my_roc_elasticHoldOut,'best', ret = 'tpr')
+coords(my_roc_elasticHoldOut,'best', ret = 'fpr')
+coords(my_roc_elasticHoldOut,'best', ret = 'precision')
+
+```
+
+## Random Forest
+```{r}
+rf.dataHoldOut <- randomForest(BlueTarp~ Red + Green + Blue, data = data, mtry=3, importance = TRUE)
+rf.dataHoldOut
+
+#prediction
+rf.predictHoldOut <- predict(rf.dataHoldOut, newdata = HoldOutData, family = 'binomial', mtry = rfmodBestTune, type="response")
+rf.predictHoldOut <- as.data.frame(rf.predictHoldOut)
+rf.predictHoldOut <- as.factor(rf.predictHoldOut$rf.predictHoldOut)
+rf.numericHoldOut <- as.numeric(rf.predictHoldOut)
+
+#confusion matrix
+confusionMatrix(reference = HoldOutData$BlueTarp, data = rf.predictHoldOut)
+
+#roc
+rocRFHoldOut <- roc(HoldOutData$BlueTarp,rf.numericHoldOut)
+plot(rocRFHoldOut)
+#performance table values
+auc(rocRFHoldOut)
+coords(rocRFHoldOut,'best', ret = 'threshold')
+coords(rocRFHoldOut,'best', ret = 'accuracy')
+coords(rocRFHoldOut,'best', ret = 'tpr')
+coords(rocRFHoldOut,'best', ret = 'fpr')
+coords(rocRFHoldOut,'best', ret = 'precision')
+
+```
+
+## SVM
+```{r}
+#predict
+ypredHoldOut <- predict(bestmod,HoldOutData,decision.values = TRUE)
+fittedHoldOut <- attributes(ypredHoldOut)$decision.values
+#confusion matrix
+confusionMatrix(data = ypredHoldOut, reference = HoldOutData$BlueTarp)
+
+#roc
+my_roc_svmHoldOut <- roc(HoldOutData$BlueTarp,fittedHoldOut)
+plot(my_roc_svmHoldOut)
+#performance table values
+auc(my_roc_svmHoldOut)
+coords(my_roc_svmHoldOut,'best', ret = 'threshold')
+coords(my_roc_svmHoldOut,'best', ret = 'accuracy')
+coords(my_roc_svmHoldOut,'best', ret = 'tpr')
+coords(my_roc_svmHoldOut,'best', ret = 'fpr')
+coords(my_roc_svmHoldOut,'best', ret = 'precision')
+
+
+```
+
+# Results (Hold-Out)
+```{r}
+#glm
+list.glmHoldOut <- list('n/a', as.numeric(my_roc_glmHoldOut$auc),as.numeric(coords(my_roc_glmHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_glmHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_glmHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_glmHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_glmHoldOut,'best', ret = 'precision')))
+df_glmHoldOut <- as.data.frame(list.glmHoldOut)
+df_glmHoldOut <- data.frame(df_glmHoldOut, row.names = 'Log Reg')
+colnames(df_glmHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_glmHoldOut
+
+#lda
+list.ldaHoldOut <- list(list('n/a', as.numeric(my_roc_ldaHoldOut$auc),as.numeric(coords(my_roc_ldaHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_ldaHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_ldaHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_ldaHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_ldaHoldOut,'best', ret = 'precision'))))
+
+df_ldaHoldOut <- as.data.frame(list.ldaHoldOut)
+df_ldaHoldOut <- data.frame(df_ldaHoldOut,row.names = 'LDA')
+colnames(df_ldaHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_ldaHoldOut
+
+#qda
+
+list.qdaHoldOut <- list(list('n/a', as.numeric(my_roc_qdaHoldOut$auc),as.numeric(coords(my_roc_qdaHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_qdaHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_qdaHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_qdaHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_qdaHoldOut,'best', ret = 'precision'))))
+
+df_qdaHoldOut <- as.data.frame(list.qdaHoldOut)
+df_qdaHoldOut <- data.frame(df_qdaHoldOut,row.names = 'QDA')
+colnames(df_qdaHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_qdaHoldOut
+
+#knn
+list.knnHoldOut <- list(list(as.numeric(knnBestTune), as.numeric(my_roc_knnHoldOut$auc),as.numeric(coords(my_roc_knnHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_knnHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_knnHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_knnHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_knnHoldOut,'best', ret = 'precision'))))
+
+df_knnHoldOut <- as.data.frame(list.knnHoldOut)
+df_knnHoldOut <- data.frame(df_knnHoldOut,row.names = 'KNN')
+colnames(df_knnHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_knnHoldOut
+
+#elastic
+
+list.elasticHoldOut <- list(list(model.elastic$bestTune$lambda, as.numeric(my_roc_elasticHoldOut$auc),as.numeric(coords(my_roc_elasticHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_elasticHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_elasticHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_elasticHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_elasticHoldOut,'best', ret = 'precision'))))
+
+df_elasticHoldOut <- as.data.frame(list.elasticHoldOut)
+df_elasticHoldOut <- data.frame(df_elasticHoldOut,row.names = 'Penalized Log Reg')
+colnames(df_elasticHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_elasticHoldOut
+
+#random forest 
+list.rfHoldOut <- list(list(rfmodBestTune, as.numeric(rocRF$auc),as.numeric(coords(rocRFHoldOut,'best',ret = 'threshold')),as.numeric(coords(rocRFHoldOut,'best', ret = 'accuracy')),as.numeric(coords(rocRFHoldOut,'best', ret = 'tpr')),as.numeric(coords(rocRFHoldOut,'best', ret = 'fpr')),as.numeric(coords(rocRFHoldOut,'best', ret = 'precision'))))
+
+df_rfHoldOut <- as.data.frame(list.rfHoldOut)
+df_rfHoldOut <- data.frame(df_rfHoldOut,row.names = 'Random Forest')
+colnames(df_rfHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_rfHoldOut
+
+
+#svm
+list.svmCostHoldOut <- list(list(svmRadialBestTuneCost, as.numeric(my_roc_svmHoldOut$auc),as.numeric(coords(my_roc_svmHoldOut,'best',ret = 'threshold')),as.numeric(coords(my_roc_svmHoldOut,'best', ret = 'accuracy')),as.numeric(coords(my_roc_svmHoldOut,'best', ret = 'tpr')),as.numeric(coords(my_roc_svmHoldOut,'best', ret = 'fpr')),as.numeric(coords(my_roc_svmHoldOut,'best', ret = 'precision'))))
+
+df_svmCostHoldOut <- as.data.frame(list.svmCostHoldOut)
+df_svmCostHoldOut <- data.frame(df_svmCostHoldOut,row.names = 'Support Vector Machine (Best Cost Parameter')
+colnames(df_svmCostHoldOut) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+df_svmCostHoldOut
+
+```
+**Hold-Out Performance Table Here**
+```{r}
+#Perf Table Hold Out
+
+HoldOutPerfTable <- rbind(df_glmHoldOut,df_ldaHoldOut,df_qdaHoldOut,df_knnHoldOut,df_elasticHoldOut,df_rfHoldOut,df_svmCostHoldOut)
+colnames(HoldOutPerfTable) <- c('Tuning','AUROC','Threshold','Accuracy','TPR','FPR',	'Precision')
+
+HoldOutPerfTable
+```
+
+# Final Conclusions
+
+### Conclusion \#1 
+A discussion of the best performing algorithm(s) in the cross-validation and hold-out data.
+The best performing algorithm in the cross-validation was Random Forest. The Random Forest model had a mtry value of 2. The accuracy of the model was 0.9971221. However in the hold-out data set, the Logistic Regression model performed the best. It had an accuracy of 0.9939829. 
+
+### Conclusion \#2
+A discussion or analysis justifying why your findings above are compatible or reconcilable.
+The findings presented in this analysis are accurate throughout since we were able to create and train our model in part 1 and then test it using a split data set. We then saw that the models performed pretty well on the Hold Out data set which was not given until our models were created. This allowed us to use our models on a new data set and see how well they truly perform. The models were able to be used throughout the analysis since we set seeds at the start which allows us to reproduce our models at any given point. The models were compatible with the new data set after we did some data cleaning on the Hold Out data set. 
+
+### Conclusion \#3
+A recommendation and rationale regarding which algorithm to use for detection of blue tarps.
+I would recommend using the logistic regression model for the detection of blue tarps because it had the highest accuracy in cross validation and the second highest accuracy on the hold out data. Its accuracy was right up there with random forest but the precision of logistic regression was alot better than random forest. In the hold out data it also had a much better TPR.  
+
+### Conclusion \#4 
+A discussion of the relevance of the metrics calculated in the tables to this application context.
+The metrics calculated are relevant to this problem because we are trying to see how well our model predicts whether or not a blue tarp is present based on the predictors, Red, Green and Blue. The metrics we looked at gave us insight on how well the model performed through cross-validation on the data set we split into train and test as well as on a completely separate test set that we did not have access to previously. I focused mostly on Accuracy and TPR as the metrics to help evaluate model performance. I felt that these two metrics provided the best insight into model evaluation. 
+
+### Conclusion \#5
+One thing that I could do different that may improve results is to use a multinomial approach instead of binomial. I set my factor to a Boolean. It was either Blue Tarp or not Blue Tarp, even though the original data set had more than just Blue Tarp as a category. I think that this may help improve the overall prediction since it would be more representative of the real world. I think that the multinomial approach would work better than binomial. 
+
+### Conclusion \#6
+Another model that performed very well on the Hold out data was the penalized logistic regression model. It had an accuracy of 0.9933980 which was slightly below logistic regression, which had the highest accuracy. The True Positive Rate was 0.9899081 which was also just slightly below logistic regression. The only area where it tested significantly worse than logistic regression was in precision. I think the penalized logistic regression model would be a good alternative to logistic regression since it tested slightly worse that the logistic regression model. 
